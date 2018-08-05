@@ -220,7 +220,13 @@ class NoteMarkerBase(ReferenceBase, Label):
             document.set_reference(target_id, 'number', formatted_label)
 
     def before_placing(self, container):
-        note = container.document.elements[self.target_id(container.document)]
+        target_id = self.target_id(container.document)
+        try:
+            note = container.document.elements[target_id]
+        except KeyError:
+            self.warn("Failed to find reference {}".format(target_id))
+            return
+
         try:
             container._footnote_space.add_footnote(note)
         except ReflowRequired:

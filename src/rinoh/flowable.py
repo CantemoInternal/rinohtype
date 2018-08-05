@@ -255,7 +255,7 @@ class Flowable(Styled):
             state = eoc.flowable_state
             first_line_ascender = 0
             try:
-                content_width = state.width
+                content_width = state.width or pad_cntnr.width
             except AttributeError:
                 content_width = pad_cntnr.width
         padded_width = content_width + padding_h

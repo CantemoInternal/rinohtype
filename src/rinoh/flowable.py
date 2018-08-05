@@ -250,7 +250,8 @@ class Flowable(Styled):
                 self.render(pad_cntnr, descender, state=state,
                             space_below=space_below, **kwargs)
             state = None
-            assert container.advance2(space_below)
+            if not container.advance2(space_below):
+                self.warn("space_below was false")
         except EndOfContainer as eoc:
             state = eoc.flowable_state
             first_line_ascender = 0

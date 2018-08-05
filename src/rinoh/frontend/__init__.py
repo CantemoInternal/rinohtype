@@ -11,6 +11,7 @@ from itertools import chain
 from ..attribute import AttributesDictionary
 from ..flowable import StaticGroupedFlowables
 from ..util import NotImplementedAttribute
+import warnings
 
 
 __all__ = ['TreeNode', 'InlineNode', 'BodyNode', 'BodySubNode', 'GroupingNode',
@@ -27,9 +28,10 @@ class TreeNode(object):
             return cls._mapping[node_name.replace('-', '_')](node)
         except KeyError:
             filename, line, node_name = cls.node_location(node)
-            raise NotImplementedError("{}:{} the '{}' node is not yet supported "
-                                      "({})" .format(filename, line, node_name,
-                                                     cls.__module__))
+            warnings.warn("{}:{} the '{}' node is not yet supported "
+                          "({})" .format(filename, line, node_name,
+                                         cls.__module__))
+            return DummyNode(node)
 
     def __init__(self, doctree_node):
         self.node = doctree_node

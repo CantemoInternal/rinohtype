@@ -6,12 +6,14 @@ Setup script for rinohtype
 
 import sys
 
+import pkg_resources
+
 from setuptools import setup, find_packages
 from setuptools.command.build_py import build_py
 
 
-if sys.version_info < (3, 4):
-    print('rinohtype requires Python 3.4 or higher')
+if sys.version_info < (3, 5):
+    print('rinohtype requires Python 3.5 or higher')
     sys.exit(1)
 
 
@@ -21,11 +23,11 @@ def get_version():
     from datetime import date
     from subprocess import check_output, CalledProcessError, DEVNULL
 
-    VERSION = '0.3.2.dev'
+    VERSION = '0.4.2'
 
     try:
         is_dirty = check_output(['git', 'status', '--porcelain'],
-                                stderr=DEVNULL) != b''
+                                stderr=DEVNULL).decode('utf-8')
     except CalledProcessError:
         is_dirty = None   # not running from a git checkout
 
@@ -45,10 +47,11 @@ def get_version():
     else:  # release distribution
         if is_dirty is None:
             assert version_from_pkginfo() in (VERSION, None)
-        else:
-            assert not is_dirty
+        elif is_dirty:
+            print(is_dirty)
+            assert False
         version = VERSION
-    return version
+    return pkg_resources.safe_version(version)
 
 
 def version_from_pkginfo():
@@ -103,7 +106,7 @@ setup(
     packages=find_packages('src'),
     package_dir={'': 'src'},
     include_package_data=True,
-    python_requires='>= 3.4',
+    python_requires='>= 3.5',
     install_requires=['setuptools', 'pip', 'docutils', 'recommonmark',
                       'rinoh-typeface-texgyrecursor>=0.1.1',
                       'rinoh-typeface-texgyreheros>=0.1.1',
@@ -156,9 +159,13 @@ setup(
         'License :: OSI Approved :: GNU Affero General Public License v3',
         'Operating System :: OS Independent',
         'Programming Language :: Python :: 3 :: Only',
-        'Programming Language :: Python :: 3.4',
+        'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: Implementation :: CPython',
+        'Programming Language :: Python :: Implementation :: PyPy',
         'Topic :: Printing',
         'Topic :: Software Development :: Libraries :: Python Modules',
         'Topic :: Text Processing :: Fonts',

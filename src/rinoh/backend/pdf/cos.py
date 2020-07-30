@@ -149,7 +149,7 @@ class Integer(Object, int):
         return int.__repr__(self)
 
     def _bytes(self, document):
-        return int.__str__(self).encode('utf_8')
+        return self._repr().encode('utf_8')
 
 
 class Real(Object, float):
@@ -357,6 +357,8 @@ class Dictionary(Container, OrderedDict):
     __contains__ = convert_key_to_name(OrderedDict.__contains__)
 
     get = convert_key_to_name(OrderedDict.get)
+
+    setdefault = convert_key_to_name(OrderedDict.setdefault)    # PyPy
 
     def _bytes(self, document):
         return b' '.join(key.bytes(document) + b' ' + value.bytes(document)

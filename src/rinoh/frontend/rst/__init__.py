@@ -21,7 +21,7 @@ from .. import (TreeNode, TreeNodeMeta, InlineNode, BodyNode, BodySubNode,
 __all__ = ['DocutilsNode', 'DocutilsInlineNode',
            'DocutilsBodyNode', 'DocutilsBodySubNode',
            'DocutilsGroupingNode', 'DocutilsDummyNode',
-           'ReStructuredTextReader']
+           'ReStructuredTextReader', 'from_doctree']
 
 
 class DocutilsNode(TreeNode, metaclass=TreeNodeMeta):
@@ -105,7 +105,7 @@ from . import nodes
 class DocutilsReader(Reader):
     parser_class = None
 
-    def parse(self, filename_or_file):
+    def parse(self, filename_or_file, **context):
         try:
             filename = Path(filename_or_file)
             settings_overrides = dict(input_encoding='utf-8')
@@ -118,14 +118,15 @@ class DocutilsReader(Reader):
             doctree = publish_doctree(filename_or_file,
                                       source_class=FileInput,
                                       parser=self.parser_class())
-        return self.from_doctree(filename, doctree)
-
-    def from_doctree(self, filename, doctree):
-        mapped_tree = DocutilsNode.map_node(doctree.document)
-        flowables = mapped_tree.children_flowables()
-        return DocumentTree(flowables, source_file=Path(filename))
+        return from_doctree(filename, doctree, **context)
 
 
 class ReStructuredTextReader(DocutilsReader):
     extensions = ('rst', )
     parser_class = ReStructuredTextParser
+
+
+def from_doctree(filename, doctree, **context):
+    mapped_tree = DocutilsNode.map_node(doctree.document, **context)
+    flowables = mapped_tree.children_flowables()
+    return DocumentTree(flowables, source_file=Path(filename))

@@ -54,7 +54,7 @@ def test_highlight_block():
            Token('sandwich', Name.Function), Token('(', Punctuation),
            Token('bread', Name), Token(',', Punctuation), Token(' ', Text),
            Token('cheese', Name), Token('=', Operator),
-           Token('True', Name.Builtin.Pseudo), Token('):', Punctuation),
+           Token('True', Keyword.Constant), Token('):', Punctuation),
          Token('\n' + indent + '    ', Text), Token('result', Name),
            Token(' ', Text), Token('=', Operator), Token(' ', Text),
            Token('[]', Punctuation),
@@ -102,7 +102,7 @@ def test_get_pygments_style_sphinx():
 @requires_pygments
 def test_pygments_style_to_stylesheet():
     def matching_style(style_sheet, token_type):
-        match, = style_sheet.find_matches(Token('text', token_type), None)
+        match, = style_sheet.find_matches(Token('text', token_type))
         return style_sheet[match.style_name]
 
     class SimpleStyle(Style):

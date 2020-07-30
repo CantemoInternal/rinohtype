@@ -1,13 +1,14 @@
 *.pyc
 *~
 *.rtc
-/.python-version
+Brewfile.lock.json
 /.cache
 /.pytest_cache
 /.idea
 /.eggs
 /.tox
 /.coverage
+/.venv
 /coverage.xml
 /build
 /dist

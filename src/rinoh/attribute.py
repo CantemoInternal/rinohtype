@@ -10,20 +10,21 @@ import re
 
 from collections import OrderedDict
 from configparser import ConfigParser
-from io import BytesIO
+from io import StringIO
 from itertools import chain
 from pathlib import Path
-from token import NUMBER, ENDMARKER, MINUS, PLUS, NAME
-from tokenize import tokenize, ENCODING
+from token import NUMBER, ENDMARKER, MINUS, PLUS, NAME, NEWLINE
+from tokenize import generate_tokens
 from warnings import warn
 
 from .util import (NamedDescriptor, WithNamedDescriptors,
-                   NotImplementedAttribute, class_property, PeekIterator)
+                   NotImplementedAttribute, class_property, PeekIterator,
+                   cached)
 
 
 __all__ = ['AttributeType', 'AcceptNoneAttributeType', 'OptionSet', 'Attribute',
-           'OverrideDefault', 'AttributesDictionary', 'RuleSet', 'RuleSetFile',
-           'Bool', 'Integer', 'ParseError', 'Var']
+           'OverrideDefault', 'AttributesDictionary', 'Configurable',
+           'RuleSet', 'RuleSetFile', 'Bool', 'Integer', 'ParseError', 'Var']
 
 
 class AttributeType(object):
@@ -43,9 +44,7 @@ class AttributeType(object):
 
     @classmethod
     def parse_string(cls, string):
-        encoded_string = BytesIO(string.encode('utf-8'))
-        tokens = PeekIterator(tokenize(encoded_string.readline))
-        assert next(tokens)[:2] == (ENCODING, 'utf-8')
+        tokens = TokenIterator(string)
         result = cls.from_tokens(tokens)
         if next(tokens).type != ENDMARKER:
             raise ParseError('Syntax error')
@@ -87,6 +86,8 @@ class AttributeType(object):
 
 
 class AcceptNoneAttributeType(AttributeType):
+    """Accepts 'none' (besides other values)"""
+
     @classmethod
     def check_type(cls, value):
         return (isinstance(value, type(None))
@@ -166,6 +167,7 @@ class OptionSet(AttributeType, metaclass=OptionSetMeta):
 
 class Attribute(NamedDescriptor):
     """Descriptor used to describe a style attribute"""
+
     def __init__(self, accepted_type, default_value, description):
         self.name = None
         self.accepted_type = accepted_type
@@ -181,12 +183,13 @@ class Attribute(NamedDescriptor):
     def __set__(self, style, value):
         if not self.accepted_type.check_type(value):
             raise TypeError('The {} attribute only accepts {} instances'
-                            .format(self.name, self.accepted_type))
+                            .format(self.name, self.accepted_type.__name__))
         style[self.name] = value
 
 
 class OverrideDefault(Attribute):
     """Overrides the default value of an attribute defined in a superclass"""
+
     def __init__(self, default_value):
         self._default_value = default_value
 
@@ -226,19 +229,18 @@ class WithAttributes(WithNamedDescriptors):
                         pass
                 else:
                     raise NotImplementedError
-                doc.append('{0} (:class:`.{1}`): Overrides the default '
-                           'set in :attr:`{2} <.{2}.{0}>`'
-                           .format(name, attr.accepted_type.__name__,
-                                   mro_cls.__name__))
+                doc.append('{0}: Overrides the default '
+                           'set in :attr:`{1} <.{1}.{0}>`'
+                           .format(name, mro_cls.__name__))
             else:
-                doc.append('{} (:class:`.{}`): {}'
-                           .format(name, attr.accepted_type.__name__,
-                                   attr.description))
+                doc.append('{}: {}'.format(name, attr.description))
             format = attr.accepted_type.doc_format()
             default = attr.accepted_type.doc_repr(attr.default_value)
-            doc.append('\n            Accepts: {}\n'.format(format))
-            doc.append('\n            Default: {}\n'.format(default))
+            doc.append('\n            *Accepts* :class:`.{}`: {}\n'
+                       .format(attr.accepted_type.__name__, format))
+            doc.append('\n            *Default*: {}\n'.format(default))
         supported_attributes = list(name for name in attributes)
+        documented = set(supported_attributes)
         for base_class in bases:
             try:
                 supported_attributes.extend(base_class._supported_attributes)
@@ -246,16 +248,17 @@ class WithAttributes(WithNamedDescriptors):
                 continue
             for mro_cls in base_class.__mro__:
                 for name, attr in getattr(mro_cls, '_attributes', {}).items():
-                    if name in attributes:
+                    if name in documented:
                         continue
-                    doc.append('{} (:class:`.{}`): (:attr:`{} <.{}.{}>`) {}'
-                               .format(name, attr.accepted_type.__name__,
-                                       mro_cls.__name__, mro_cls.__name__,
-                                       name, attr.description))
+                    doc.append('{0}: {1} (inherited from :attr:`{2} <.{2}.{0}>`)'
+                               .format(name, attr.description,
+                                       mro_cls.__name__))
                     format = attr.accepted_type.doc_format()
                     default = attr.accepted_type.doc_repr(attr.default_value)
-                    doc.append('\n            Accepts: {}\n'.format(format))
-                    doc.append('\n            Default: {}\n'.format(default))
+                    doc.append('\n            *Accepts* :class:`.{}`: {}\n'
+                               .format(attr.accepted_type.__name__, format))
+                    doc.append('\n            *Default*: {}\n'.format(default))
+                    documented.add(name)
         if doc:
             attr_doc = '\n        '.join(chain(['    Attributes:'], doc))
             cls_dict['__doc__'] = (cls_dict.get('__doc__', '') + '\n\n'
@@ -277,10 +280,8 @@ class WithAttributes(WithNamedDescriptors):
 
 
 class AttributesDictionary(OrderedDict, metaclass=WithAttributes):
-    default_base = None
-
     def __init__(self, base=None, **attributes):
-        self.base = base or self.default_base
+        self.base = base
         for name, value in attributes.items():
             attributes[name] = self.validate_attribute(name, value, True)
         super().__init__(attributes)
@@ -318,13 +319,29 @@ class AttributesDictionary(OrderedDict, metaclass=WithAttributes):
             pass
         raise KeyError(name)
 
-    def get_value(self, attribute, rule_set):
-        value = self[attribute]
-        if isinstance(value, Var):
-            accepted_type = self.attribute_definition(attribute).accepted_type
-            value = value.get(accepted_type, rule_set)
-            value = self.validate_attribute(attribute, value, False)
-        return value
+    @classmethod
+    def get_ruleset(self):
+        raise NotImplementedError
+
+
+class DefaultValueException(Exception):
+    pass
+
+
+class Configurable(object):
+    configuration_class = NotImplementedAttribute()
+
+    def configuration_name(self, document):
+        raise NotImplementedError
+
+    def get_config_value(self, attribute, document):
+        ruleset = self.configuration_class.get_ruleset(document)
+        return ruleset.get_value_for(self, attribute, document)
+
+
+class BaseConfigurationException(Exception):
+    def __init__(self, base_name):
+        self.name = base_name
 
 
 class RuleSet(OrderedDict):
@@ -336,12 +353,15 @@ class RuleSet(OrderedDict):
         self.base = base
         self.variables = OrderedDict()
 
-    def __getitem__(self, name):
+    def contains(self, name):
+        return name in self or (self.base and self.base.contains(name))
+
+    def get_configuration(self, name):
         try:
-            return super().__getitem__(name)
+            return self[name]
         except KeyError:
-            if self.base is not None:
-                return self.base[name]
+            if self.base:
+                return self.base.get_configuration(name)
             raise
 
     def __setitem__(self, name, style):
@@ -353,25 +373,61 @@ class RuleSet(OrderedDict):
     def __call__(self, name, **kwargs):
         self[name] = self.get_entry_class(name)(**kwargs)
 
-    def __str__(self):
+    def __repr__(self):
         return '{}({})'.format(type(self).__name__, self.name)
 
-    def get_variable(self, name, accepted_type):
+    def __str__(self):
+        return repr(self)
+
+    def __bool__(self):
+        return True
+
+    def get_variable(self, variable):
         try:
-            return self._get_variable(name, accepted_type)
+            return self.variables[variable.name]
         except KeyError:
             if self.base:
-                return self.base.get_variable(name, accepted_type)
-            else:
-                raise VariableNotDefined("Variable '{}' is not defined"
-                                         .format(name))
-
-    def _get_variable(self, name, accepted_type):
-        return self.variables[name]
+                return self.base.get_variable(variable)
+            raise VariableNotDefined("Variable '{}' is not defined"
+                                     .format(variable.name))
 
     def get_entry_class(self, name):
         raise NotImplementedError
 
+    def _get_value_recursive(self, name, attribute):
+        if name in self:
+            entry = self[name]
+            if attribute in entry:
+                return entry[attribute]
+            elif isinstance(entry.base, str):
+                raise BaseConfigurationException(entry.base)
+            elif entry.base is not None:
+                return entry.base[attribute]
+        if self.base:
+            return self.base._get_value_recursive(name, attribute)
+        raise DefaultValueException
+
+    @cached
+    def get_value(self, name, attribute):
+        try:
+            return self._get_value_recursive(name, attribute)
+        except BaseConfigurationException as exc:
+            return self.get_value(exc.name, attribute)
+
+    def _get_value_lookup(self, configurable, attribute, document):
+        name = configurable.configuration_name(document)
+        return self.get_value(name, attribute)
+
+    def get_value_for(self, configurable, attribute, document):
+        try:
+            value = self._get_value_lookup(configurable, attribute, document)
+        except DefaultValueException:
+            value = configurable.configuration_class._get_default(attribute)
+        if isinstance(value, Var):
+            config = configurable.configuration_class
+            value = config.validate_attribute(attribute,
+                                              self.get_variable(value), False)
+        return value
 
 
 class RuleSetFile(RuleSet):
@@ -399,17 +455,13 @@ class RuleSetFile(RuleSet):
                 name, classifier = section_name.strip(), None
             self.process_section(name, classifier, section_body.items())
 
-    def _get_variable(self, name, accepted_type):
-        variable = super()._get_variable(name, accepted_type)
-        if isinstance(variable, str):
-            variable = accepted_type.from_string(variable)
-        return variable
-
     def process_section(self, section_name, classifier, items):
         raise NotImplementedError
 
 
 class Bool(AttributeType):
+    """Expresses a binary choice"""
+
     @classmethod
     def check_type(cls, value):
         return isinstance(value, bool)
@@ -433,6 +485,8 @@ class Bool(AttributeType):
 
 
 class Integer(AttributeType):
+    """Accepts natural numbers"""
+
     @classmethod
     def check_type(cls, value):
         return isinstance(value, int)
@@ -457,6 +511,21 @@ class Integer(AttributeType):
         return 'a natural number (positive integer)'
 
 
+class TokenIterator(PeekIterator):
+    """Tokenizes `string` and iterates over the tokens"""
+
+    def __init__(self, string):
+        self.string = string
+        tokens = generate_tokens(StringIO(string).readline)
+        super().__init__(tokens)
+
+    def _advance(self):
+        result = super()._advance()
+        if self.next and self.next.type == NEWLINE and self.next.string == '':
+            super()._advance()
+        return result
+
+
 class ParseError(Exception):
     pass
 
@@ -473,6 +542,9 @@ class Var(object):
 
     def __str__(self):
         return '$({})'.format(self.name)
+
+    def __eq__(self, other):
+        return self.name == other.name
 
     def get(self, accepted_type, rule_set):
         return rule_set.get_variable(self.name, accepted_type)

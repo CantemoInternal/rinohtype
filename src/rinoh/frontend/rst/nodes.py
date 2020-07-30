@@ -22,7 +22,6 @@ from ...util import intersperse
 # (http://docutils.sourceforge.net/docs/ref/doctree.html)
 # - abbreviation? (not exposed in default reStructuredText; Sphinx has :abbr:)
 # - acronym (not exposed in default reStructuredText?)
-# - math / math_block
 # - pending (should not appear in final doctree?)
 # - substitution_reference (should not appear in final doctree?)
 
@@ -180,8 +179,7 @@ class Topic(DocutilsGroupingNode):
                 return rt.StaticGroupedFlowables(flowables,
                                                  style='table of contents')
             else:
-                toc_id, = self.get('ids')
-                return rt.SetMetadataFlowable(toc_id=toc_id)
+                return rt.SetMetadataFlowable(toc_ids=self.get('ids'))
         elif 'dedication' in classes:
             return self._process_topic('dedication')
         elif 'abstract' in classes:
@@ -231,6 +229,14 @@ class Title(DocutilsBodyNode, DocutilsInlineNode):
 class Subtitle(DocutilsBodyNode):
     def build_flowable(self):
         return rt.SetMetadataFlowable(subtitle=self.process_content())
+
+
+class Math_Block(DocutilsBodyNode):
+    style = 'math'
+
+    def build_flowables(self):
+        yield rt.WarnFlowable("The 'math' directive is not yet supported")
+        yield rt.Paragraph(self.process_content(), style=self.style)
 
 
 class Admonition(DocutilsGroupingNode):
@@ -310,6 +316,14 @@ class Title_Reference(DocutilsInlineNode):
 
 class Literal(Inline):
     style = 'monospaced'
+
+
+class Math(Inline):
+    style = 'math'
+
+    def build_styled_text(self):
+        return (rt.WarnInline("The 'math' role is not yet supported")
+                + super().build_styled_text())
 
 
 class Superscript(DocutilsInlineNode):
@@ -439,7 +453,9 @@ class Citation_Reference(Footnote_Reference):
 
 class Substitution_Definition(DocutilsBodyNode):
     def build_flowable(self):
-        return rt.DummyFlowable()
+        label, = self.node.attributes['names']
+        content = self.process_content()
+        return rt.SetUserStringFlowable(label, content)
 
 
 class Target(DocutilsBodyNode, DocutilsInlineNode):
@@ -518,7 +534,7 @@ class Field_List(DocutilsGroupingNode):
 class Field(DocutilsBodyNode):
     @property
     def name(self):
-        return str(self.field_name.styled_text())
+        return self.field_name.text
 
     @property
     def value(self):
@@ -702,9 +718,8 @@ class Entry(DocutilsGroupingNode):
 
 class Raw(DocutilsBodyNode, DocutilsInlineNode):
     def build_styled_text(self):
-        cls, = self['classes']
-        return rt.WarnInline('{}: raw interpreted text roles are not supported'
-                             .format(cls))
+        if self['format'] == 'rinoh':
+            return rt.StyledText.from_string(self.text)
 
     def build_flowable(self):
         if self['format'] == 'rinoh':
@@ -729,4 +744,9 @@ class Raw(DocutilsBodyNode, DocutilsInlineNode):
 
 
 class Container(DocutilsGroupingNode):
-    pass
+    def build_flowable(self, style=None, **kwargs):
+        classes = self.get('classes')
+        if 'literal-block-wrapper' in classes:
+            return rt.CodeBlockWithCaption(self.children_flowables(),
+                                           style=style or self.style, **kwargs)
+        return super().build_flowable(style, **kwargs)

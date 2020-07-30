@@ -1,3 +1,4 @@
+dist: bionic
 language: python
 
 sudo: false
@@ -7,9 +8,11 @@ cache:
     pip: true
 
 python:
-  - 3.4
   - 3.5
   - 3.6
+  - 3.7
+  - 3.8
+  - 3.9-dev
   - nightly
   - pypy3
 
@@ -22,9 +25,9 @@ env:
 matrix:
   fast_finish: true
   include:
-    - python: 3.6
+    - python: 3.8
       env: TOXENV=check
-    - python: 3.6
+    - python: 3.8
       env:
         - TOXENV=regression
           WITH_COVERAGE=1
@@ -32,117 +35,87 @@ matrix:
         apt:
           packages:
             - imagemagick
-            # poppler dependencies
-            - libfreetype6
-            - libfontconfig1
-            - libopenjpeg2
-            - libjpeg8
-            - libtiff5
-            - liblcms2-2
-            - libcairo2
-      before_install:
-        # install poppler (required by the diffpdf script)
-        - travis_retry curl -L https://github.com/brechtm/rinohtype-travis/releases/download/v1/dotlocal.tar.xz | tar xJ -C ~
-        - export PATH=$HOME/.local/bin:$PATH
-        - export LD_LIBRARY_PATH=$HOME/.local/lib
+            - poppler-utils
     - os: osx
       sudo: required
       language: objective-c
       cache:
         pip: false
         directories:
+          - /usr/local/Homebrew
+          - $HOME/Library/Caches/Homebrew
           - $HOME/Library/Caches/pip
           - $HOME/.pyenv
       env:
         - DIST=sdist
-          TOXENV=py34,py35,py36
           WITH_COVERAGE=1
+        # don't set TOXENV; run all envs listed in tox.ini's envlist
+      addons:
+        homebrew:
+          update: true
+          brewfile: Brewfile
       before_install:
-        - brew update
         - brew unlink pyenv
         - brew install --HEAD pyenv
         - eval "$(pyenv init -)"
-        - pyenv install --skip-existing 3.4.6
-        - pyenv install --skip-existing 3.5.3
-        - pyenv install --skip-existing 3.6.1
-        - pyenv global 3.6.1 3.4.6 3.5.3
+        - /usr/bin/python pyenv_setup.py
         - python --version
         - python3 --version
-        - python3.4 --version
         - python3.5 --version
         - python3.6 --version
-    - os: osx
-      sudo: required
-      language: objective-c
-      cache:
-        pip: false
-        directories:
-          - $HOME/Library/Caches/pip
-          - $HOME/.pyenv
-      env:
-        - TOXENV=regression
-          WITH_COVERAGE=1
-      before_install:
-        - brew update
-        - brew install imagemagick poppler
-        - brew unlink pyenv
-        - brew install --HEAD pyenv
-        - eval "$(pyenv init -)"
-        - pyenv install --skip-existing 3.6.1
-        - pyenv global 3.6.1
-        - python --version
-        - python3 --version
-    - python: 3.6
+        - python3.7 --version
+        - python3.8 --version
+        - python3.9 --version
+        - python3.10 --version
+        - pypy3 --version
+        - poetry install --no-root
+        - source .venv/bin/activate
+      install:
+      before_cache:
+        - brew cleanup
+    - python: 3.8
       env:
         - TOXENV=longrunning
-          TIMEOUT=45
+          TIMEOUT=45m
           WITH_COVERAGE=0
       addons:
         apt:
           packages:
             - imagemagick
-            # poppler dependencies
-            - libfreetype6
-            - libfontconfig1
-            - libopenjpeg2
-            - libjpeg8
-            - libtiff5
-            - liblcms2-2
-            - libcairo2
-      before_install:
-        # install poppler (required by the diffpdf script)
-        - travis_retry curl -L https://github.com/brechtm/rinohtype-travis/releases/download/v1/dotlocal.tar.xz | tar xJ -C ~
-        - export PATH=$HOME/.local/bin:$PATH
-        - export LD_LIBRARY_PATH=$HOME/.local/lib
-    - python: 3.6
-      env: TOXENV=test-docs
-    - python: 3.6
+            - poppler-utils
+    - python: 3.8
+      env: TOXENV=check-docs
+    - python: 3.8
       env: TOXENV=build-docs
-    - os: osx
-      sudo: required
-      language: objective-c
-      cache:
-        pip: false
-        directories:
-          - $HOME/Library/Caches/pip
-          - $HOME/.pyenv
-      env:
-        - TOXENV=macapp
-      before_install:
-        - brew update
-        - brew unlink pyenv
-        - brew install --HEAD pyenv
-        - eval "$(pyenv init -)"
-        - pyenv install --skip-existing 3.5.3
-        - pyenv global 3.5.3
-        - python --version
+#    - os: osx
+#      sudo: required
+#      language: objective-c
+#      cache:
+#        pip: false
+#        directories:
+#          - /usr/local/Homebrew
+#          - $HOME/Library/Caches/Homebrew
+#          - $HOME/Library/Caches/pip
+#          - $HOME/.pyenv
+#      env:
+#        - TOXENV=macapp
+#      before_install:
+#        - brew unlink pyenv
+#        - brew install --HEAD pyenv
+#        - eval "$(pyenv init -)"
+#        - pyenv install --skip-existing 3.7.6
+#        - pyenv shell 3.7.6
+#        - python --version
+#      before_cache:
+#        - brew cleanup
 
 install:
+  - pip install travis-wait-improved
   - pip install tox-travis wheel
   - python setup.py bdist_wheel
 
 script:
-  - function timeout { [ -z $TIMEOUT ] || echo "travis_wait $TIMEOUT"; }
+  - function timeout { [ -z $TIMEOUT ] || echo "travis-wait-improved --timeout $TIMEOUT"; }
   - function installpkg { [[ $DIST == "wheel" ]] && echo "--installpkg ./dist/rinohtype-*.whl"; }
   - $(timeout) tox -v $(installpkg)
 

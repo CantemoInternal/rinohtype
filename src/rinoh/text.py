@@ -8,21 +8,11 @@
 """
 Classes for describing styled text:
 
+* :class:`StyledText`: Base class for styled text.
 * :class:`SingleStyledText`: Text of a single style.
 * :class:`MixedStyledText`: Text where different substrings can have different
                             styles.
-* :class:`LiteralText`: Text that is typeset as is, including newlines and tabs.
 * :class:`TextStyle`: Style class specifying the font and other styling of text.
-
-A number of :class:`MixedStyledText` subclasses are provided for changing a
-single style attribute of the passed text:
-
-* :class:`Bold`
-* :class:`Italic`
-* :class:`Emphasized`
-* :class:`SmallCaps`
-* :class:`Superscript`
-* :class:`Subscript`
 
 Some characters with special properties and are represented by special classes:
 
@@ -41,24 +31,28 @@ from ast import literal_eval
 from html.entities import name2codepoint
 from token import NAME, STRING, NEWLINE, LPAR, RPAR, ENDMARKER
 
-from .attribute import (AttributeType, Attribute, Bool, Integer,
-                        AcceptNoneAttributeType, ParseError)
+from .attribute import (AttributeType, AcceptNoneAttributeType, Attribute,
+                        Bool, Integer)
 from .color import Color, BLACK
 from .dimension import Dimension, PT
 from .font import Typeface
 from .fonts import adobe14
 from .font.style import (FontWeight, FontSlant, FontWidth, FontVariant,
                          TextPosition)
-from .style import Style, Styled, StyledMeta, PARENT_STYLE, StyleException
-from .util import NotImplementedAttribute, PeekIterator
+from .style import Style, Styled, StyledMeta
+from .util import NotImplementedAttribute
 
-__all__ = ['TextStyle', 'StyledText', 'WarnInline', 'SingleStyledText',
-           'MixedStyledText', 'ConditionalMixedStyledText', 'Space',
-           'FixedWidthSpace', 'NoBreakSpace', 'Spacer', 'Tab', 'Newline',
-           'Superscript', 'Subscript']
+
+__all__ = ['InlineStyle', 'InlineStyled', 'TextStyle', 'StyledText',
+           'WarnInline', 'SingleStyledText', 'MixedStyledText',
+           'ConditionalMixedStyledText',
+           'Space', 'FixedWidthSpace', 'NoBreakSpace', 'Spacer', 'Tab',
+           'Newline', 'Superscript', 'Subscript']
 
 
 class Locale(AttributeType):
+    """Selects a language"""
+
     REGEX = re.compile(r'^[a-z]{2}_[A-Z]{2}$')
 
     @classmethod
@@ -78,28 +72,24 @@ class Locale(AttributeType):
         return 'locale identifier in the ``<language ID>_<region ID>`` format'
 
 
-class TextStyle(Style):
-    typeface = Attribute(Typeface, adobe14.times, 'Typeface to set the text in')
-    font_weight = Attribute(FontWeight, 'medium', 'Thickness of character '
-                                                  'outlines relative to their '
-                                                  'height')
-    font_slant = Attribute(FontSlant, 'upright', 'Slope style of the font')
-    font_width = Attribute(FontWidth, 'normal', 'Stretch of the characters')
-    font_size = Attribute(Dimension, 10*PT, 'Height of characters')
-    font_color = Attribute(Color, BLACK, 'Color of the font')
-    font_variant = Attribute(FontVariant, 'normal', 'Variant of the font')
-    position = Attribute(TextPosition, 'normal', 'Vertical text position')
-    kerning = Attribute(Bool, True, 'Improve inter-letter spacing')
-    ligatures = Attribute(Bool, True, 'Run letters together where possible')
-    # TODO: character spacing
-    hyphenate = Attribute(Bool, True, 'Allow words to be broken over two lines')
-    hyphen_chars = Attribute(Integer, 2, 'Minimum number of characters in a '
-                                         'hyphenated part of a word')
-    hyphen_lang = Attribute(Locale, 'en_US', 'Language to use for hyphenation. '
-                                             'Accepts locale codes such as '
-                                             "'en_US'")
+class InlineStyled(Styled):
+    """"""
 
-    default_base = PARENT_STYLE
+    def wrapped_spans(self, container):
+        """Generator yielding all spans in this inline element (flattened)"""
+        before = self.get_style('before', container)
+        if before is not None:
+            before.parent = self.parent
+            yield from before.wrapped_spans(container)
+        if not self.get_style('hide', container):
+            yield from self.spans(container)
+        after = self.get_style('after', container)
+        if after is not None:
+            after.parent = self.parent
+            yield from after.wrapped_spans(container)
+
+    def spans(self, container):
+        raise NotImplementedError
 
 
 class CharacterLike(Styled):
@@ -121,10 +111,8 @@ NAME2CHAR = {name: chr(codepoint)
              for name, codepoint in name2codepoint.items()}
 
 
-class StyledText(Styled, AcceptNoneAttributeType):
+class StyledText(InlineStyled, AcceptNoneAttributeType):
     """Base class for text that has a :class:`TextStyle` associated with it."""
-
-    style_class = TextStyle
 
     def __add__(self, other):
         """Return the concatenation of this styled text and `other`. If `other`
@@ -141,51 +129,48 @@ class StyledText(Styled, AcceptNoneAttributeType):
         is `None`, this styled text itself is returned."""
         return self + other
 
+    def copy(self, id=None, style=None, parent=None):
+        raise NotImplementedError
+
     @classmethod
     def check_type(cls, value):
         return super().check_type(value) or isinstance(value, str)
 
     @classmethod
     def from_tokens(cls, tokens):
-        texts = []
-        for token in tokens:
-            if token.type == NEWLINE:
-                continue
-            elif token.type == NAME:      # inline flowable
-                directive = token.string.lower()
-                inline_flowable_class = InlineFlowable.directives[directive]
-                if next(tokens).exact_type != LPAR:
-                    raise ParseError('Expecting an opening parenthesis.')
-                args, kwargs = inline_flowable_class.arguments.parse_arguments(tokens)
-                if next(tokens).exact_type != RPAR:
-                    raise ParseError('Expecting a closing parenthesis.')
-                inline_flowable = inline_flowable_class(*args, **kwargs)
-                texts.append(inline_flowable)
-            elif token.type == STRING:    # text
-                text = literal_eval(token.string)
-                if tokens.next.exact_type == LPAR:
-                    _, start_col = next(tokens).end
-                    for token in tokens:
-                        if token.exact_type == RPAR:
-                            _, end_col = token.start
-                            style = token.line[start_col:end_col].strip()
-                            break
-                        elif token.type == NEWLINE:
-                            raise StyledTextParseError('No newline allowed in'
-                                                       'style name')
-                else:
-                    style = None
-                texts.append(cls._substitute_variables(text, style))
+        items = []
+        while tokens.next.type:
+            if tokens.next.type == NAME:
+                items.append(InlineFlowable.from_tokens(tokens))
+            elif tokens.next.type == STRING:
+                items.append(cls.text_from_tokens(tokens))
+            elif tokens.next.type == NEWLINE:
+                next(tokens)
+            elif tokens.next.type == ENDMARKER:
+                break
             else:
                 raise StyledTextParseError('Expecting text or inline flowable')
-            if tokens.next.type == ENDMARKER:
-                break
-
-        if len(texts) > 1:
-            return MixedStyledText(texts)
-        else:
-            first, = texts
+        if len(items) == 1:
+            first, = items
             return first
+        return MixedStyledText(items)
+
+    @classmethod
+    def text_from_tokens(cls, tokens):
+        text = literal_eval(next(tokens).string)
+        if tokens.next.exact_type == LPAR:
+            _, start_col = next(tokens).end
+            for token in tokens:
+                if token.exact_type == RPAR:
+                    _, end_col = token.start
+                    style = token.line[start_col:end_col].strip()
+                    break
+                elif token.type == NEWLINE:
+                    raise StyledTextParseError('No newline allowed in '
+                                               'style name')
+        else:
+            style = None
+        return cls._substitute_variables(text, style)
 
     @classmethod
     def doc_repr(cls, value):
@@ -230,18 +215,17 @@ class StyledText(Styled, AcceptNoneAttributeType):
     def paragraph(self):
         return self.parent.paragraph
 
+    def fallback_to_parent(self, attribute):
+        return attribute not in ('position', 'before', 'after')
+
     position = {TextPosition.SUPERSCRIPT: 1 / 3,
                 TextPosition.SUBSCRIPT: - 1 / 6}
     position_size = 583 / 1000
 
     def is_script(self, container):
         """Returns `True` if this styled text is super/subscript."""
-        try:
-            style = self._style(container)
-            return style.get_value('position',
-                                   container) != TextPosition.NORMAL
-        except StyleException:
-            return False
+        position = self.get_style('position', container)
+        return position != TextPosition.NORMAL
 
     def script_level(self, container):
         """Nesting level of super/subscript."""
@@ -261,30 +245,55 @@ class StyledText(Styled, AcceptNoneAttributeType):
 
     def y_offset(self, container):
         """Vertical baseline offset (up is positive)."""
-        offset = (self.parent.y_offset(container)\
+        offset = (self.parent.y_offset(container)
                   if hasattr(self.parent, 'y_offset') else 0)
         if self.is_script(container):
-            style = self._style(container)
-            offset += (self.parent.height(container) *
-                       self.position[style.position])
-            # The Y offset should only change once for the nesting level
-            # where the position style is set, hence we don't recursively
-            # get the position style using self.get_style('position')
+            position = self.get_style('position', container)
+            offset += self.parent.height(container) * self.position[position]
         return offset
 
     @property
     def items(self):
         """The list of items in this StyledText."""
-        raise NotImplementedError
-
-    def spans(self, container):
-        """Generator yielding all spans in this styled text, one
-        item at a time (used in typesetting)."""
-        raise NotImplementedError
+        return [self]
 
 
 class StyledTextParseError(Exception):
     pass
+
+
+class InlineStyle(Style):
+    before = Attribute(StyledText, None, 'Item to insert before this one')
+    after = Attribute(StyledText, None, 'Item to insert after this one')
+
+
+InlineStyled.style_class = InlineStyle
+
+
+class TextStyle(InlineStyle):
+    typeface = Attribute(Typeface, adobe14.times, 'Typeface to set the text in')
+    font_weight = Attribute(FontWeight, 'medium', 'Thickness of character '
+                                                  'outlines relative to their '
+                                                  'height')
+    font_slant = Attribute(FontSlant, 'upright', 'Slope style of the font')
+    font_width = Attribute(FontWidth, 'normal', 'Stretch of the characters')
+    font_size = Attribute(Dimension, 10*PT, 'Height of characters')
+    font_color = Attribute(Color, BLACK, 'Color of the font')
+    font_variant = Attribute(FontVariant, 'normal', 'Variant of the font')
+    # TODO: text_case = Attribute(TextCase, None, 'Change text casing')
+    position = Attribute(TextPosition, 'normal', 'Vertical text position')
+    kerning = Attribute(Bool, True, 'Improve inter-letter spacing')
+    ligatures = Attribute(Bool, True, 'Run letters together where possible')
+    # TODO: character spacing
+    hyphenate = Attribute(Bool, True, 'Allow words to be broken over two lines')
+    hyphen_chars = Attribute(Integer, 2, 'Minimum number of characters in a '
+                                         'hyphenated part of a word')
+    hyphen_lang = Attribute(Locale, 'en_US', 'Language to use for hyphenation. '
+                                             'Accepts locale codes such as '
+                                             "'en_US'")
+
+
+StyledText.style_class = TextStyle
 
 
 class WarnInline(StyledText):
@@ -301,10 +310,6 @@ class WarnInline(StyledText):
 
     def to_string(self, flowable_target):
         return ''
-
-    @property
-    def items(self):
-        return [self]
 
     def spans(self, container):
         self.warn(self.message, container)
@@ -351,10 +356,6 @@ class SingleStyledTextBase(StyledText):
         return (self.font(container).line_gap_in_pt
                 * float(self.get_style('font_size', container)))
 
-    @property
-    def items(self):
-        return [self]
-
     def spans(self, container):
         yield self
 
@@ -365,6 +366,8 @@ ESCAPE = str.maketrans({"'": r"\'",
 
 
 class SingleStyledText(SingleStyledTextBase):
+    """Text with a single style applied"""
+
     def __init__(self, text, style=None, parent=None):
         super().__init__(style=style, parent=parent)
         self._text = text
@@ -389,8 +392,7 @@ class MixedStyledTextBase(StyledText):
         mixed-styled text."""
         for child in self.children(container):
             container.register_styled(child)
-            for span in child.spans(container):
-                yield span
+            yield from child.wrapped_spans(container)
 
     def children(self, flowable_target):
         raise NotImplementedError

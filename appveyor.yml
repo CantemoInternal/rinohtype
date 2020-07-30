@@ -15,7 +15,7 @@ environment:
     BASETEMP: '%APPVEYOR_BUILD_FOLDER%\pytest_temp'
 
   matrix:
-    - TOXENV: py34,py35,py36
+    - TOXENV: py35,py36,py37,py38
 #      DIST: sdist
 #      WITH_COVERAGE: 1
 #    - TOXENV: py34,py35,py36
@@ -26,7 +26,7 @@ environment:
 #      WITH_COVERAGE: 1
     - TOXENV: longrunning
 #      WITH_COVERAGE: 0
-    - TOXENV: test-docs
+    - TOXENV: check-docs
     - TOXENV: build-docs
 
 cache:
@@ -41,6 +41,7 @@ install:
               # http://blog.alivate.com.au/poppler-windows/
               appveyor DownloadFile http://blog.alivate.com.au/wp-content/uploads/2017/01/poppler-0.51_x86.7z
               7z x poppler-0.51_x86.7z -oC:\
+              Remove-Item poppler-0.51_x86.7z
           }
           choco install imagemagick.tool
           $env:Path = "C:\ProgramData\chocolatey\lib\imagemagick.tool\tools;C:\poppler-0.51\bin;$env:Path"
@@ -52,14 +53,22 @@ build: off
 
 
 before_test:
-  - py -3.5 -m pip install tox-travis
+  - py -3.8 -m pip install tox-travis
 
 test_script:
   - echo %PATH%
-  - py -3.5 -m tox
+  - py -3.8 -m tox
 
 
 on_failure:
   - ps: |
-      7z a pytest_temp.zip pytest_temp
-      appveyor PushArtifact pytest_temp.zip
+      7z a tests_regression_output.zip tests_regression/output
+      appveyor PushArtifact tests_regression_output.zip
+
+
+notifications:
+ - provider: Webhook
+   url: https://webhooks.gitter.im/e/0fd17d2c154e08cdbc81
+   on_build_success: false
+   on_build_failure: true
+   on_build_status_changed: true

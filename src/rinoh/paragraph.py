@@ -17,7 +17,6 @@ from ast import literal_eval
 from copy import copy
 from functools import partial
 from itertools import tee, chain, groupby, count
-from math import floor
 from os import path
 
 from . import DATA_PATH
@@ -29,7 +28,7 @@ from .flowable import Flowable, FlowableStyle, FlowableState, FlowableWidth
 from .font import MissingGlyphException
 from .hyphenator import Hyphenator
 from .inline import InlineFlowableException
-from .layout import EndOfContainer
+from .layout import EndOfContainer, ContainerOverflow
 from .text import TextStyle, MixedStyledText, SingleStyledText, ESCAPE
 from .util import all_subclasses, ReadAliasAttribute
 
@@ -42,6 +41,8 @@ __all__ = ['Paragraph', 'ParagraphStyle', 'TabStop',
 # Text justification
 
 class TextAlign(OptionSet):
+    """Text justification"""
+
     values = 'left', 'right', 'center', 'justify'
 
 
@@ -249,19 +250,23 @@ PREDEFINED_SPACINGS = dict(default=DEFAULT,
 
 
 class TabAlign(OptionSet):
+    """Alignment of text with respect to a tab stop"""
+
     values = 'left', 'right', 'center'
 
 
 class TabStop(object):
-    """Horizontal position for aligning text of successive lines."""
+    """Horizontal position for aligning text of successive lines
+
+    Args:
+        position (:class:`Dimension` or :class:`Fraction`): tab stop position
+        align (TabAlign): the alignment of text with respect to the tab stop
+            positon
+        fill (str): string pattern to fill the empty tab space with
+
+    """
 
     def __init__(self, position, align='left', fill=None):
-        """`position` can be an absolute position (:class:`Dimension`) or can
-        be relative to the line width (:class:`Fraction`).
-        The alignment of text with respect to the tab stop is determined by
-        `align`, which can be :const:`LEFT`, :const:`RIGHT` or :const:`CENTER`.
-        Optionally, `fill` specifies a string pattern to fill the empty tab
-        space with."""
         self._position = position
         self.align = align
         self.fill = fill
@@ -283,6 +288,8 @@ class TabStop(object):
 
 
 class TabStopList(AttributeType, list):
+    """List of tab stop positions (with alignment and fill string)"""
+
     def __str__(self):
         return ', '.join(str(tab_stop) for tab_stop in self)
 
@@ -332,7 +339,7 @@ class TabStopList(AttributeType, list):
     def doc_format(cls):
         return ('a comma-seperated list of tab stops. A tab stop is specified '
                 'as ``<position> [align] [fill string]``, where '
-                '``<position>`` (:class:`.Dimension`) is required and '
+                '``position`` (:class:`.Dimension`) is required and '
                 '``align`` (:class:`.TabAlign`) and ``fill string`` '
                 '(string enclosed in quotes) are optional.')
 
@@ -592,7 +599,7 @@ class ParagraphBase(Flowable):
         return self
 
     def initial_state(self, container):
-        spans = self.text(container).spans(container)
+        spans = self.text(container).wrapped_spans(container)
         return ParagraphState(self, spans_to_words(spans, container))
 
     def _short_repr_args(self, flowable_target):
@@ -616,7 +623,7 @@ class ParagraphBase(Flowable):
 
         Args:
             container (Container): the container to render to
-            descender (float or None): descender height of the preceeding line
+            descender (float or None): descender height of the preceding line
             state (ParagraphState): the state where rendering will continue
             first_line_only (bool): typeset only the first line
 
@@ -640,9 +647,16 @@ class ParagraphBase(Flowable):
 
         def typeset_line(line, last_line=False):
             """Typeset `line` and, if no exception is raised, update the
-            paragraph's internal rendering state."""
+            paragraph's internal rendering state.
+
+            Args:
+                line (Line): the line to typeset
+                last_line (bool): True if this is the paragraph's last line
+
+            """
             nonlocal state, saved_state, max_line_width, descender, space_below
             max_line_width = max(max_line_width, line.cursor)
+            # descender is None when this is the first line in the container
             advance = (line.ascender(container) if descender is None
                        else line_spacing.advance(line, descender, container))
             descender = line.descender(container)   # descender <= 0
@@ -651,7 +665,10 @@ class ParagraphBase(Flowable):
             if container.remaining_height < total_advance:
                 raise EndOfContainer(saved_state)
             assert container.advance2(advance)
-            line.typeset(container, text_align, last_line)
+            try:
+                line.typeset(container, text_align, last_line)
+            except ContainerOverflow:
+                raise EndOfContainer(saved_state)
             assert container.advance2(- descender)
             state.initial = False
             saved_state = copy(state)
@@ -707,6 +724,7 @@ class Paragraph(MixedStyledText, ParagraphBase):
     """
 
     style_class = ParagraphBase.style_class
+    fallback_to_parent = ParagraphBase.fallback_to_parent
 
     def text(self, container):
         return self
@@ -844,6 +862,7 @@ class Line(list):
         self.indent = indent
         self.container = container
         self.cursor = indent
+        self.advance = 0
         self.significant_whitespace = significant_whitespace
         self._has_tab = False
         self._current_tab = None
@@ -941,8 +960,13 @@ class Line(list):
         else:   # abort if the line is empty
             return
 
+        descender = self.descender(container)
+        # Temporarily advance with descender so that overflow on
+        # before_placing (e.g. footnotes) can be detected
+        assert container.advance2(- descender)
         for glyph_span in self:
             glyph_span.span.before_placing(container)
+        assert container.advance2(descender)
 
         # horizontal displacement
         left = self.indent

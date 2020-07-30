@@ -23,7 +23,6 @@ Classes representing a document:
 from pathlib import Path
 
 import datetime
-import os
 import pickle
 import sys
 import time
@@ -37,17 +36,16 @@ from .attribute import OptionSet
 from .backend import pdf
 from .flowable import StaticGroupedFlowables
 from .language import EN
-from .layout import (Container, ReflowRequired, Chain, PageBreakException,
+from .layout import (Container, ReflowRequired,
                      BACKGROUND, CONTENT, HEADER_FOOTER)
 from .number import format_number
-from .structure import NewChapterException, Section
-from .style import DocumentLocationType, Specificity, StyleLog
+from .strings import Strings
+from .style import StyleLog
 from .util import RefKeyDictionary
 from .warnings import warn
 
 
-__all__ = ['Page', 'PageOrientation', 'PageType',
-           'DocumentPart', 'Document', 'DocumentTree']
+__all__ = ['Page', 'PageOrientation', 'PageType', 'Document', 'DocumentTree']
 
 
 class DocumentTree(StaticGroupedFlowables):
@@ -183,95 +181,12 @@ class BackendDocumentMetadata(object):
         return instance.backend_document.set_metadata(self.name, value)
 
 
-class DocumentPart(object, metaclass=DocumentLocationType):
-    """Part of a document.
-
-    Args:
-        template (DocumentPartTemplate): the template that determines the
-            contents and style of this document part
-        document (Document): the document this part belongs to
-        flowables (list[Flowable]): the flowables to render in this document
-            part
-
-    """
-
-    def __init__(self, template, document, flowables):
-        self.template = template
-        self.document = document
-        self.pages = []
-        self.chain = Chain(self)
-        for flowable in flowables or []:
-                self.chain << flowable
-
-    def _get_next_page_number(self):
-        self._last_page_number += 1
-        return self._last_page_number
-
-    @property
-    def page_number_format(self):
-        return self.template.page_number_format
-
-    @property
-    def number_of_pages(self):
-        try:
-            return self.document.part_page_counts[self.template.name].count
-        except KeyError:
-            return 0
-
-    def prepare(self):
-        for flowable in self._flowables(self.document):
-            flowable.prepare(self)
-
-    def render(self, first_page_number):
-        self.add_page(self.first_page(first_page_number))
-        for page_number, page in enumerate(self.pages, first_page_number + 1):
-            try:
-                page.render()
-                break_type = None
-            except NewChapterException as nce:
-                break_type = nce.break_type
-            except PageBreakException as pbe:
-                break_type = None
-            page.place()
-            if self.chain and not self.chain.done:
-                next_page_type = 'left' if page.number % 2 else 'right'
-                page = self.new_page(page_number, next_page_type == break_type)
-                self.add_page(page)     # this grows self.pages!
-        next_page_type = 'right' if page_number % 2 else 'left'
-        end_at_page = self.document.get_template_option(self.template.name,
-                                                        'end_at_page')
-        if next_page_type == end_at_page:
-            self.add_page(self.first_page(page_number + 1))
-        return len(self.pages)
-
-    def add_page(self, page):
-        """Append `page` (:class:`Page`) to this :class:`DocumentPart`."""
-        self.pages.append(page)
-
-    def first_page(self, page_number):
-        return self.new_page(page_number, new_chapter=True)
-
-    def new_page(self, page_number, new_chapter, **kwargs):
-        """Called by :meth:`render` with the :class:`Chain`s that need more
-        :class:`Container`s. This method should create a new :class:`Page` which
-        contains a container associated with `chain`."""
-        right_template = self.document.get_page_template(self, 'right')
-        left_template = self.document.get_page_template(self, 'left')
-        page_template = right_template if page_number % 2 else left_template
-        return page_template.page(self, page_number, self.chain, new_chapter,
-                                  **kwargs)
-
-    @classmethod
-    def match(cls, styled, container):
-        if isinstance(container.document_part, cls):
-            return Specificity(0, 1, 0, 0, 0)
-        else:
-            return None
-
-
 class PartPageCount(object):
     def __init__(self):
         self.count = 0
+
+    def __repr__(self):
+        return repr(self.count)
 
     def __eq__(self, other):
         return self.count == other.count
@@ -313,7 +228,7 @@ class Document(object):
         self.document_tree = document_tree
         self.stylesheet = stylesheet
         self.language = language
-        self._strings = strings or ()
+        self._strings = strings or Strings()
         self.backend = backend or pdf
         self.backend_document = self.backend.Document(self.CREATOR)
         self._flowables = list(id(element)
@@ -328,6 +243,8 @@ class Document(object):
         self.page_references = {}      # mapping id's to page numbers
         self._sections = []
         self.index_entries = {}
+        self._glossary = {}
+        self._glossary_first = {}
         self._unique_id = 0
         self.error = False
 
@@ -369,11 +286,29 @@ to the terms of the GNU Affero General Public License version 3.''')
     def get_reference(self, id, reference_type):
         return self.references[id][reference_type]
 
+    def set_glossary(self, term, definition):
+        try:
+            existing_definition = self._glossary[term]
+            return definition == existing_definition
+        except KeyError:
+            self._glossary[term] = definition
+            return True
+
+    def get_glossary(self, term, id):
+        try:
+            first_id = self._glossary_first[term]
+        except KeyError:
+            self._glossary_first[term] = id
+            return self._glossary[term], id
+        return self._glossary[term], first_id
+
     def _load_cache(self, filename):
         """Load the cached page references from `<filename>.ptc`."""
+        cache_path = filename.with_suffix(self.CACHE_EXTENSION)
         try:
-            with open(filename + self.CACHE_EXTENSION, 'rb') as file:
+            with cache_path.open('rb') as file:
                 prev_number_of_pages, prev_page_references = pickle.load(file)
+            print('References cache read from {}'.format(cache_path))
         except (IOError, TypeError):
             prev_number_of_pages, prev_page_references = {}, {}
         return prev_number_of_pages, prev_page_references
@@ -384,6 +319,9 @@ to the terms of the GNU Affero General Public License version 3.''')
         with cache_path.open('wb') as file:
             cache = (section_number_of_pages, page_references)
             pickle.dump(cache, file)
+
+    def set_string(self, strings_class, key, value):
+        self._strings[strings_class][key] = value
 
     def get_string(self, strings_class, key):
         if (strings_class in self._strings
@@ -497,7 +435,7 @@ to the terms of the GNU Affero General Public License version 3.''')
         part_page_count = PartPageCount()
         last_number_format = None
         for part_template in self.part_templates:
-            part = part_template.document_part(self, part_page_count.count + 1)
+            part = part_template.document_part(self)
             if part is None:
                 continue
             if part_template.page_number_format != last_number_format:

@@ -252,9 +252,13 @@ class TableOfContentsSection(Section):
 
     def get_id(self, document, create=True):
         try:
-            return document.metadata['toc_id']
+            return document.metadata['toc_ids'][0]
         except KeyError:
             return super().get_id(document, create)
+
+    def get_ids(self, document):
+        yield self.get_id(document)
+        yield from document.metadata.get('toc_ids', [])[1:]
 
 
 class TableOfContents(GroupedFlowables):
@@ -277,11 +281,13 @@ class TableOfContents(GroupedFlowables):
             while next(items) is not section:  # fast-forward `items` to the
                 pass                           # first sub-section of `section`
             for item in items:
-                if item.level == section.level:
+                if item.level <= section.level:
                     break
                 yield item
 
         depth = self.get_style('depth', container)
+        if self.local and self.section:
+            depth += self.level - 1
         items = (section for section in container.document._sections
                  if section.show_in_toc(container) and section.level <= depth)
         if self.local and self.section:
@@ -437,12 +443,13 @@ class Admonition(StaticGroupedFlowables):
         inline_title = self.get_style('inline_title', container)
         if inline_title and isinstance(first_flowable, Paragraph):
             title = MixedStyledText(title, style='inline title')
-            kwargs = dict(id=first_flowable.id, style=first_flowable.style)
+            kwargs = dict(id=first_flowable.id, style=first_flowable.style,
+                          parent=self)
             paragraph = Paragraph(title + ' ' + first_flowable, **kwargs)
             paragraph.secondary_ids = first_flowable.secondary_ids
             yield paragraph
         else:
-            yield Paragraph(title, style='title')
+            yield Paragraph(title, style='title', parent=self)
             yield first_flowable
         for flowable in flowables:
             yield flowable

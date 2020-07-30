@@ -52,6 +52,9 @@ typeface=$(mono_typeface)
 hyphenate=False
 ligatures=False
 
+[inline math]
+base=monospaced
+
 [quote]
 font_slant=italic
 
@@ -63,15 +66,21 @@ font_weight=BOLD
 
 [file path]
 base=monospaced
+ligatures=False
 
 [keystrokes]
 base=monospaced
+ligatures=False
 
 [regular expression]
 base=monospaced
+ligatures=False
+hyphenate=False
 
 [code with variable]
 base=monospaced
+ligatures=False
+hyphenate=False
 
 [mail header]
 base=literal emphasis
@@ -133,17 +142,27 @@ font_color=#376f62
 [broken hyperlink]
 font_color=#7f7f7f
 
+[glossary inline definition]
+before=' ('
+after=')'
+
 [code block]
 typeface=$(mono_typeface)
 font_size=9pt
 text_align=LEFT
 indent_first=0
+ligatures=False
+hyphenate=False
 space_above=6pt
 space_below=4pt
 border=$(thin_black_stroke)
 padding_left=5pt
 padding_top=1pt
 padding_bottom=3pt
+
+[math block]
+base=code block
+border=none
 
 [block quote]
 margin_left=1cm
@@ -485,6 +504,8 @@ text_align=LEFT
 base=default
 typeface=$(mono_typeface)
 font_size=8pt
+ligatures=False
+hyphenate=False
 
 [option argument]
 base=default
@@ -500,11 +521,9 @@ border_top=$(thin_black_stroke)
 border_bottom=$(thin_black_stroke)
 
 [admonition title]
-base=default
+base=body
 keep_with_next=true
 font_weight=BOLD
-indent_first=0
-space_above=5pt
 space_below=2pt
 
 [admonition inline title]
@@ -804,6 +823,8 @@ indent_first=-40pt
 
 [domain index entry name]
 typeface=$(mono_typeface)
+ligatures=False
+hyphenate=False
 
 
 # chapter titles

@@ -1,6 +1,10 @@
+:warnings:
+    No definition given for 'FIFO' glossary term
+
 Inline Markup roles:
 
-:abbr:          :abbr:`LIFO (last-in, first-out)` :abbr:`KISS`
+:abbr:          :abbr:`LIFO (last-in, first-out)`; :abbr:`FIFO`;
+                :abbr:`KISS (keep it simple, stupid)`; :abbr:`LIFO`
 :command:       :command:`rm`
 :dfn:           :dfn:`definition`
 :file:          :file:`README.txt` :file:`Makefile`

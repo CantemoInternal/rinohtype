@@ -18,7 +18,7 @@ that make up the content of a document and are rendered onto its pages.
 
 
 from copy import copy
-from itertools import chain, tee
+from itertools import chain
 from token import NAME
 
 from .attribute import Attribute, OptionSet, Bool, OverrideDefault
@@ -27,7 +27,8 @@ from .dimension import Dimension, PT, DimensionBase
 from .draw import ShapeStyle, Rectangle, Line, LineStyle, Stroke
 from .layout import (InlineDownExpandingContainer, VirtualContainer,
                      MaybeContainer, ContainerOverflow, EndOfContainer,
-                     PageBreakException)
+                     PageBreakException, ReflowRequired)
+from .strings import UserStrings
 from .style import Styled, Style
 from .text import StyledText
 from .util import ReadAliasAttribute
@@ -35,7 +36,7 @@ from .util import ReadAliasAttribute
 
 __all__ = ['Flowable', 'FlowableStyle', 'FlowableWidth',
            'DummyFlowable', 'AnchorFlowable', 'WarnFlowable',
-           'SetMetadataFlowable', 'AddToFrontMatter',
+           'SetMetadataFlowable', 'SetUserStringFlowable', 'AddToFrontMatter',
            'GroupedFlowables', 'StaticGroupedFlowables',
            'LabeledFlowable', 'GroupedLabeledFlowables',
            'Float',
@@ -43,6 +44,8 @@ __all__ = ['Flowable', 'FlowableStyle', 'FlowableWidth',
 
 
 class FlowableWidth(OptionSet):
+    """Controls the width of a flowable"""
+
     values = ('auto', 'fill')
 
     @classmethod
@@ -56,8 +59,14 @@ class FlowableWidth(OptionSet):
         else:
             return Dimension.from_tokens(tokens)
 
+    @classmethod
+    def doc_format(cls):
+        return super(cls, cls).doc_format() + ' or ' + Dimension.doc_format()
+
 
 class HorizontalAlignment(OptionSet):
+    """Controls horizontal placement"""
+
     values = 'left', 'right', 'center'
 
 
@@ -66,9 +75,9 @@ class FlowableStyle(Style):
     horizontal_align = Attribute(HorizontalAlignment, 'left',
                                  'Horizontal alignment of the flowable')
     space_above = Attribute(Dimension, 0, 'Vertical space preceding the '
-                                              'flowable')
+                                          'flowable')
     space_below = Attribute(Dimension, 0, 'Vertical space following the '
-                                              'flowable')
+                                          'flowable')
     margin_left = Attribute(Dimension, 0, 'Left margin')
     margin_right = Attribute(Dimension, 0, 'Right margin')
     padding = Attribute(Dimension, 0, 'Padding')
@@ -85,9 +94,6 @@ class FlowableStyle(Style):
     border_bottom = Attribute(Stroke, None, 'Border below the flowable')
     background_color = Attribute(Color, None, "Color of the area within the "
                                               "flowable's borders")
-    hide = Attribute(Bool, False, 'Suppress rendering the flowable')
-
-    default_base = None
 
 
 class FlowableState(object):
@@ -110,12 +116,12 @@ class Flowable(Styled):
     """A document element that can be "flowed" into a container on the page.
 
     A flowable can adapt to the width of the container, or it can horizontally
-    align itself in the container (see :class:`HorizontallyAlignedFlowable`).
+    align itself in the container.
 
     Args:
       align (HorizontalAlignment): horizontal alignment of the flowable
-      width (DimensionBase or None): the width of the table. If ``None``,
-          the width of the flowable is automatically determined.
+      width (FlowableWidth or DimensionBase): the width of the flowable.
+
     """
 
     style_class = FlowableStyle
@@ -170,7 +176,8 @@ class Flowable(Styled):
             offset = float(container.width - bordered_width)
         container.left += offset
 
-    def flow(self, container, last_descender, state=None, **kwargs):
+    def flow(self, container, last_descender, state=None, space_below=0,
+             **kwargs):
         """Flow this flowable into `container` and return the vertical space
         consumed.
 
@@ -185,6 +192,7 @@ class Flowable(Styled):
             if not container.advance2(float(space_above)):
                 raise EndOfContainer(state)
             top_to_baseline += float(space_above)
+        self_space_below = float(self.get_style('space_below', container))
         margin_left = self.get_style('margin_left', container)
         margin_right = self.get_style('margin_right', container)
         reference_id = self.get_id(container.document, create=False)
@@ -195,8 +203,9 @@ class Flowable(Styled):
                                                         right=right)
         initial_before = state.initial
         state, width, inner_top_to_baseline, descender = \
-            self.flow_inner(margin_container, last_descender,
-                            state=state, **kwargs)
+            self.flow_inner(margin_container, last_descender, state=state,
+                            space_below=space_below + self_space_below,
+                            **kwargs)
         self._align(margin_container, width)
         initial_after = state is not None and state.initial
         top_to_baseline += inner_top_to_baseline
@@ -213,12 +222,12 @@ class Flowable(Styled):
         if state is not None:
             raise EndOfContainer(state)
 
-        space_below = self.get_style('space_below', container)
-        container.advance2(float(space_below), ignore_overflow=True)
+        container.advance2(self_space_below, ignore_overflow=True)
         container.document.progress(self, container)
         return margin_left + width + margin_right, top_to_baseline, descender
 
-    def flow_inner(self, container, descender, state=None, **kwargs):
+    def flow_inner(self, container, descender, state=None, space_below=0,
+                   **kwargs):
         def border_width(attribute):
             border = self.get_style(attribute, container)
             return border.width if border else 0
@@ -239,7 +248,8 @@ class Flowable(Styled):
         border_h = border_left + border_right
         left = padding_left + border_left
         right = container.width - padding_right - border_right
-        space_below = float(padding_bottom + border_bottom)
+        padding_border_bottom = float(padding_bottom + border_bottom)
+        total_space_below = space_below + padding_border_bottom
         if draw_top:
             if not container.advance2(padding_top + border_top):
                 return state, 0, 0, descender
@@ -248,9 +258,9 @@ class Flowable(Styled):
         try:
             content_width, first_line_ascender, descender = \
                 self.render(pad_cntnr, descender, state=state,
-                            space_below=space_below, **kwargs)
+                            space_below=total_space_below, **kwargs)
             state = None
-            assert container.advance2(space_below)
+            assert container.advance2(padding_border_bottom)
         except EndOfContainer as eoc:
             state = eoc.flowable_state
             first_line_ascender = 0
@@ -323,11 +333,8 @@ class DummyFlowable(Flowable):
         super().__init__(id=id, parent=parent)
 
     def get_style(self, attribute, flowable_target):
-        if attribute == 'keep_with_next':
-            return True
-        elif attribute == 'hide':
-            return False
-        raise TypeError
+        return dict(keep_with_next=True,
+                    hide=False)[attribute]
 
     def flow(self, container, last_descender, state=None, **kwargs):
         return 0, 0, last_descender
@@ -378,6 +385,18 @@ class SetMetadataFlowable(DummyFlowable):
         flowable_target.document.metadata.update(self.metadata)
 
 
+class SetUserStringFlowable(DummyFlowable):
+    """Add an entry to the document's :class:`UserStrings`"""
+    def __init__(self, label, content, parent=None):
+        super().__init__(parent=parent)
+        self.label = label
+        self.content = content
+
+    def build_document(self, flowable_target):
+        doc = flowable_target.document
+        doc.set_string(UserStrings, self.label, self.content)
+
+
 class AddToFrontMatter(DummyFlowable):
     def __init__(self, flowables, parent=None):
         super().__init__(parent=parent)
@@ -391,25 +410,35 @@ class AddToFrontMatter(DummyFlowable):
 
 class GroupedFlowablesState(FlowableState):
     def __init__(self, groupedflowables, flowables, first_flowable_state=None,
-                 _initial=True):
+                 _initial=True, _index=0):
         super().__init__(groupedflowables, _initial)
-        self.flowables = flowables
+        self.flowables = list(flowables)
         self.first_flowable_state = first_flowable_state
+        self._index = _index
 
     groupedflowables = ReadAliasAttribute('flowable')
 
+    @property
+    def at_end(self):
+        return self._index >= len(self.flowables)
+
     def __copy__(self):
-        copy_flowables, self.flowables = tee(self.flowables)
+        copy_flowables = copy(self.flowables)
         copy_first_flowable_state = copy(self.first_flowable_state)
         return self.__class__(self.groupedflowables, copy_flowables,
-                              copy_first_flowable_state, _initial=self.initial)
+                              copy_first_flowable_state, _initial=self.initial,
+                              _index=self._index)
 
     def next_flowable(self):
-        return next(self.flowables)
+        try:
+            result = self.flowables[self._index]
+        except IndexError:
+            raise StopIteration
+        self._index += 1
+        return result
 
     def prepend(self, first_flowable_state):
-        first_flowable = first_flowable_state.flowable
-        self.flowables = chain((first_flowable, ), self.flowables)
+        self._index -= 1
         if first_flowable_state:
             self.first_flowable_state = first_flowable_state
             self.initial = self.initial and first_flowable_state.initial
@@ -435,7 +464,7 @@ class GroupedFlowables(Flowable):
     style_class = GroupedFlowablesStyle
 
     def flowables(self, container):
-        """Generator yielding the :class:`Flowable`\ s to group"""
+        """Generator yielding the :class:`Flowable`\\ s to group"""
         raise NotImplementedError
 
     def initial_state(self, container):
@@ -450,14 +479,13 @@ class GroupedFlowables(Flowable):
         pass   # only the children place content on the page
 
     def render(self, container, descender, state, first_line_only=False,
-               space_below=0, **kwargs):
+               **kwargs):
         max_flowable_width = 0
         first_top_to_baseline = None
         item_spacing = self.get_style('flowable_spacing', container)
         saved_state = copy(state)
         try:
             while True:
-                # TODO: consider space_below for the last flowable
                 width, top_to_baseline, descender = \
                     self._flow_with_next(state, container, descender,
                                          first_line_only=first_line_only,
@@ -479,7 +507,8 @@ class GroupedFlowables(Flowable):
             raise exc
         return max_flowable_width, first_top_to_baseline or 0, descender
 
-    def _flow_with_next(self, state, container, descender, **kwargs):
+    def _flow_with_next(self, state, container, descender, space_below=0,
+                        **kwargs):
         try:
             flowable = state.next_flowable()
             while flowable.is_hidden(container):
@@ -490,7 +519,9 @@ class GroupedFlowables(Flowable):
         with MaybeContainer(container) as maybe_container:
             max_flowable_width, top_to_baseline, descender = \
                 flowable.flow(maybe_container, descender,
-                              state=state.first_flowable_state, **kwargs)
+                              state=state.first_flowable_state,
+                              space_below=space_below if state.at_end else 0,
+                              **kwargs)
         state.initial = False
         state.first_flowable_state = None
         if flowable.get_style('keep_with_next', container):
@@ -498,7 +529,9 @@ class GroupedFlowables(Flowable):
             maybe_container.advance(item_spacing)
             try:
                 width, _, descender = self._flow_with_next(state, container,
-                                                           descender, **kwargs)
+                                                           descender,
+                                                           space_below=space_below,
+                                                           **kwargs)
             except EndOfContainer as eoc:
                 if eoc.flowable_state.initial:
                     maybe_container.do_place(False)
@@ -621,7 +654,7 @@ class LabeledFlowable(Flowable):
         return LabeledFlowableState(self, initial_content_state)
 
     def render(self, container, last_descender, state, label_column_width=None,
-               **kwargs):
+               space_below=0, **kwargs):
         def style(name):
             return self.get_style(name, container)
 
@@ -684,8 +717,9 @@ class LabeledFlowable(Flowable):
                                                      width=label_cntnr_width,
                                                      advance_parent=False)
                     label_container.advance(offset_label)
-                    _, _, label_descender = self.label.flow(label_container,
-                                                            last_descender)
+                    _, _, label_descender = \
+                        self.label.flow(label_container, last_descender,
+                                        space_below=space_below)
                     label_height = label_container.height
                     if label_spillover:
                         maybe_container.advance(label_height)
@@ -700,7 +734,8 @@ class LabeledFlowable(Flowable):
                                                  advance_parent=False)
                 width, _, content_descender \
                     = self.flowable.flow(content_container, last_descender,
-                                         state=state.content_flowable_state)
+                                         state=state.content_flowable_state,
+                                         space_below=space_below)
                 content_height = content_container.cursor
         except (ContainerOverflow, EndOfContainer) as eoc:
             content_state = eoc.flowable_state if rendering_content else None
@@ -776,7 +811,8 @@ class Float(Flowable):
             if id not in container.document.floats:
                 super().flow(container.float_space, None)
                 container.document.floats.add(id)
-                container.page.check_overflow()
+                if not container.page.check_overflow():
+                    raise ReflowRequired
             return 0, 0, last_descender
         else:
             return super().flow(container, last_descender, state=state,

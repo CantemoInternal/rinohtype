@@ -1,9 +1,12 @@
 
+.. role:: hide
+   :class: hide
+
 
 Section One
 -----------
 
-Paragraph in section 1.
+Paragraph in section 1. :hide:`HIDDEN`
 
 
 Subsection A
@@ -19,6 +22,7 @@ Paragraph in subsection 1B.
 
 
 .. class:: hide
+
 Subsection C (hidden)
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -26,8 +30,9 @@ Paragraph in subsection 1C.
 
 
 .. class:: hide
+
 Section Two (hidden)
-------------------
+--------------------
 
 Paragraph in section 2.
 
@@ -39,8 +44,9 @@ Paragraph in subsection 2A.
 
 
 .. class:: hide
-Subsection B (hidden)
-~~~~~~~~~~~~~~~~~~~~~
+
+Subsection 2B (hidden)
+~~~~~~~~~~~~~~~~~~~~~~
 
 Paragraph in subsection 2B.
 
@@ -59,6 +65,7 @@ Paragraph in section 3.
 
 
 .. class:: hide
+
 Subsection A (hidden)
 ~~~~~~~~~~~~~~~~~~~~~
 

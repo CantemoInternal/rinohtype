@@ -69,7 +69,6 @@ class Scale(OptionSet):
 
 class ImageState(FlowableState):
     image = ReadAliasAttribute('flowable')
-    width = None
 
 
 class Filename(str):
@@ -91,7 +90,7 @@ class OptionalArg(Attribute):
     pass
 
 
-class String(AcceptNoneAttributeType):
+class ImagePath(AcceptNoneAttributeType):
     @classmethod
     def from_tokens(cls, tokens):
         token = next(tokens)
@@ -99,9 +98,13 @@ class String(AcceptNoneAttributeType):
             raise ParseError('Expecting a string')
         return literal_eval(token.string)
 
+    @classmethod
+    def doc_format(cls):
+        return ('path to an image file enclosed in quotes')
+
 
 class ImageArgsBase(AttributesDictionary):
-    file_or_filename = RequiredArg(String, 'Path to the image file')
+    file_or_filename = RequiredArg(ImagePath, 'Path to the image file')
 
     scale = OptionalArg(Scale, 'fit', 'Scaling factor for the image')
     width = OptionalArg(Dimension, None, 'The width to scale the image to')
@@ -125,7 +128,7 @@ class ImageArgsBase(AttributesDictionary):
         argument_type = argument_definition.accepted_type
         arg_tokens_iter = PeekIterator(arg_tokens)
         argument = argument_type.from_tokens(arg_tokens_iter)
-        if not arg_tokens_iter._at_end:
+        if not arg_tokens_iter.at_end:
             raise ParseError('Syntax error')
         return argument, tokens.next.exact_type in (RPAR, ENDMARKER)
 
@@ -368,7 +371,7 @@ class Caption(NumberedParagraph):
     def prepare(self, flowable_target):
         super().prepare(flowable_target)
         document = flowable_target.document
-        get_style = partial(self.get_style, flowable_target=flowable_target)
+        get_style = partial(self.get_style, container=flowable_target)
         category = self.referenceable.category
         numbering_level = get_style('numbering_level')
         section = self.section

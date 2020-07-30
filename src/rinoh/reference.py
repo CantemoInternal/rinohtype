@@ -14,7 +14,7 @@ from itertools import chain, zip_longest
 from .annotation import NamedDestinationLink, AnnotatedSpan
 from .attribute import Attribute, OptionSet
 from .flowable import Flowable, LabeledFlowable, DummyFlowable
-from .layout import ReflowRequired
+from .layout import ReflowRequired, ContainerOverflow
 from .number import NumberStyle, Label, format_number
 from .paragraph import Paragraph, ParagraphStyle, ParagraphBase
 from .strings import StringCollection, StringField
@@ -58,10 +58,6 @@ class ReferenceBase(MixedStyledTextBase):
 
     def target_id(self, document):
         raise NotImplementedError
-
-    @property
-    def items(self):
-        return [self]
 
     def children(self, container):
         if container is None:
@@ -149,11 +145,12 @@ class ReferenceText(StyledText):
 
     @classmethod
     def _substitute_variables(cls, text, style):
-        def create_reference_field(key, style=None):
-            return ReferenceField(key.lower(), style=style)
-
         return substitute_variables(text, cls.RE_TYPES, create_reference_field,
                                     super()._substitute_variables, style)
+
+
+def create_reference_field(key, style=None):
+    return ReferenceField(key.lower(), style=style)
 
 
 class ReferencingParagraphStyle(ParagraphStyle):
@@ -221,10 +218,8 @@ class NoteMarkerBase(ReferenceBase, Label):
 
     def before_placing(self, container):
         note = container.document.elements[self.target_id(container.document)]
-        try:
-            container._footnote_space.add_footnote(note)
-        except ReflowRequired:
-            pass
+        if not container._footnote_space.add_footnote(note):
+            raise ContainerOverflow
         super().before_placing(container)
 
 
@@ -300,7 +295,7 @@ class SectionFieldType(FieldTypeBase, metaclass=SectionFieldTypeMeta):
     def __repr__(self):
         return "{}({})".format(type(self).__name__, self.level)
 
-    REGEX = re.compile('(?P<name>[a-z_]+)\((?P<level>\d+)\)', re.IGNORECASE)
+    REGEX = re.compile(r'(?P<name>[a-z_]+)\((?P<level>\d+)\)', re.IGNORECASE)
 
     @classmethod
     def from_string(cls, string):
@@ -321,11 +316,9 @@ class SECTION_TITLE(SectionFieldType):
 
 from . import structure    # fills StringCollection.subclasses
 
-RE_STRINGFIELD = ('|'.join(r'{}\.(?:{})'
-                           .format(collection_name, '|'.join(s.name for s
-                                                             in cls._strings))
-                           for collection_name, cls
-                           in StringCollection.subclasses.items()))
+RE_STRINGFIELD = ('|'.join(r'{}\.(?:[a-z_][a-z0-9_]*)'
+                           .format(collection_name)
+                           for collection_name in StringCollection.subclasses))
 
 
 class Field(MixedStyledTextBase):
@@ -349,10 +342,6 @@ class Field(MixedStyledTextBase):
         except KeyError:
             field = SectionFieldType.from_string(string)
         return cls(field, style=style)
-
-    @property
-    def items(self):
-        return [self]
 
     def children(self, container):
         if container is None:

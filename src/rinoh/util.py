@@ -25,16 +25,18 @@ import os
 import posixpath
 import time
 
-from collections import MutableMapping, OrderedDict
+from collections import OrderedDict
+from collections.abc import MutableMapping
 from functools import wraps
 from weakref import ref
 
 
-__all__ = ['all_subclasses', 'intersperse', 'last', 'unique', 'PeekIterator',
-           'posix_path', 'consumer', 'cached', 'cached_property',
-           'cached_generator', 'class_property', 'timed', 'Decorator',
-           'ReadAliasAttribute', 'NotImplementedAttribute', 'NamedDescriptor',
-           'WithNamedDescriptors', 'ContextManager', 'RefKeyDictionary']
+__all__ = ['all_subclasses', 'intersperse', 'PeekIterator', 'posix_path',
+           'consumer', 'cached', 'cached_property', 'cached_generator',
+           'class_property', 'timed', 'Decorator', 'ReadAliasAttribute',
+           'NotImplementedAttribute', 'NamedDescriptor',
+           'WithNamedDescriptors', 'ContextManager', 'RefKeyDictionary',
+           'VersionError']
 
 
 # functions
@@ -52,36 +54,18 @@ def intersperse(iterable, element):
     inserted between each two consecutive elements"""
     iterable = iter(iterable)
     yield next(iterable)
-    while True:
-        next_from_iterable = next(iterable)
+    for next_from_iterable in iterable:
         yield element
         yield next_from_iterable
 
 
-def last(iterable):
-    """Return an iterable's last item"""
-    result = None
-    for item in iterable:
-        result = item
-    return result
-
-
-def unique(iterable):
-    """Filter out duplicate items from an iterable"""
-    seen = set()
-    for item in iterable:
-        if item not in seen:
-            seen.add(item)
-            yield item
-
-
 class PeekIterator(object):
-    """An _iterator that allows inspecting the next element"""
+    """An iterator that allows inspecting the next element"""
 
     def __init__(self, iterable):
         self.next = None
         self._iterator = iter(iterable)
-        self._at_end = False
+        self.at_end = False
         self._advance()
 
     def _advance(self):
@@ -90,14 +74,14 @@ class PeekIterator(object):
             self.next = next(self._iterator)
         except StopIteration:
             self.next = None
-            self._at_end = True
+            self.at_end = True
         return result
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        if self._at_end:
+        if self.at_end:
             raise StopIteration
         return self._advance()
 
@@ -193,9 +177,9 @@ def timed(function):
     def function_wrapper(obj, *args, **kwargs):
         """Wrapper function printing the time taken by the call to `function`"""
         name = obj.__class__.__name__ + '.' + function.__name__
-        start = time.clock()
+        start = time.process_time()
         result = function(obj, *args, **kwargs)
-        print('{}: {:.4f} seconds'.format(name, time.clock() - start))
+        print('{}: {:.4f} seconds'.format(name, time.process_time() - start))
         return result
     return function_wrapper
 
@@ -286,9 +270,8 @@ class RefKeyDictionary(MutableMapping):
     """A dictionary that compares keys based on their id (address). Hence, the
     keys can be mutable."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self):
         self.store = dict()
-        self.update(dict(*args, **kwargs))
 
     def __getitem__(self, obj):
         obj_weakref, value = self.store[id(obj)]
@@ -307,3 +290,9 @@ class RefKeyDictionary(MutableMapping):
 
     def __len__(self):
         return len(self.store)
+
+
+# exceptions
+
+class VersionError(Exception):
+    """An incompatible version of a dependency is installed"""

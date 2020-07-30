@@ -1,34 +1,82 @@
 Release History
 ---------------
 
-Release 0.3.2.dev
-~~~~~~~~~~~~~~~~~
+Release 0.4.2 (2020-07-28)
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+New Features:
+
+* before/after style attributes for StyledText (issue #158)
+* docutils/Sphinx frontend: don't abort on encountering math/math_block, output
+  the (LaTeX) math markup instead, along with printing a warning.
+* docutils frontend: raw inline text (with ``:format: 'rinoh'``) is parsed as
+  styled text
+
+
+Fixed:
+
+* crash when the 'contents' topic has multiple IDs (issue #173)
+* loading of the references cache (issue #170)
+* some issues with space_below handling
+
+
+Release 0.4.1 (2020-07-01)
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+New Features:
+
+* UserStrings: arbitrary user-defined strings that can be defined in the
+  template configuration or as a substitution definition in reStructuredText
+* strings in a StringCollection can now be styled text
+* Sphinx frontend: use the ``today`` and ``today_fmt`` configuration variables
+  for the date on the title page
+* Sphinx frontend: allow extensions access to the builder object (issue #155)
+* rinoh: ``--output`` writes the output PDF to a specified location
+
+Fixed:
+
+* Regression in handling images that don't fit on the current page (issue #153)
+* Fix crash when rendering local table of contents (issue #160)
+* Sphinx frontend: support code-block/literalinclude with caption (issue #128)
+* rinoh: variables set in a template configuration file are sometimes ignored
+  (issue #164)
+* Crash when using a font that contains unsupported lookups (issue #141)
+
+
+Release 0.4.0 (2020-03-05)
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 New Features:
 
 * automatically generated lists of figures and tables
 * paragraphs now provide default tab stops (proportional to font size) for
   indentation
+* stylesheet (.rts) and template configuration (.rtt) files now support
+  specifying inline and background images (#107 and #108); to be documented
 * it is now possible to specify selector priority (+-) in style sheets
 * Sphinx frontend: the rinoh builder can be discovered by entry point
   (no more need to add 'rinoh.frontend.sphinx' to the list of extensions)
 * rinoh: set a return code of 1 when one or more referenced images could not be
   found (issue #104)
-* rinoh: introduce the --install-resources option to control the automatic
+* rinoh: introduce the ``--install-resources`` option to control the automatic
   installation of resources from PyPI
 * German locale (contributed by Michael Kaiser)
 * Polish locale (contributed by Mariusz Jamro)
 
 Changed:
 
-* Python 3.3 is no longer supported since it has reached end-of-life
+* Python 3.3 & 3.4 are no longer supported since they have reached end-of-life
 * remove the dependency on purepng by embedding its png.py
 * limit the width of images to the available width by default
 * XML frontend: special case mixed content nodes
+* fixes in the design of stylesheet/template code
 
 Fixed:
 
-* Border width is also taken into account for flowables that are continued on a
+* various regressions (PR #142 by Norman Lorrain)
+* fix issues with variables defined in a base style sheet/template config
+* various footnote rendering issues
+* border width is also taken into account for flowables that are continued on a
   new page (#127)
 * Sphinx: handle case when source_suffix is a list (PR #110 by Nick Barrett)
 * incompatibility with Sphinx 1.6.1+ (latex_paper_size)
@@ -38,6 +86,11 @@ Fixed:
 * crash when a table cell contains (only) an image
 * colours of PNG images with gamma (gAMA chunk) set are incorrect (#102)
 * Sphinx: image paths with wildcard extension are not supported (#119)
+* GroupedFlowables: space_below should only be considered at the end
+* adapt to PEP 479 (Change StopIteration handling inside generators), the
+  default in Python 3.7 (issue #133)
+* fix compatibility with Python 3.6.7 and 3.7.1 (tokenizer changes)
+* fix crash caused by Python 3.8's changes to int.__str__
 
 
 Release 0.3.1 (2016-12-19)
